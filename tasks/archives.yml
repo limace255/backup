@@ -1,0 +1,87 @@
+---
+- name: Ensure Archive working folder exists
+  file:
+    path: "{{ archive_work_path }}"
+    state: directory
+    owner: "{{ archive_user }}"
+    group: "{{ archive_group }}"
+    mode: 0700
+
+- name: Ensure Main Archive Folder exists on Target Server
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "backup-infra"
+    group: "{{ archive_group }}"
+    mode: 0750
+  delegate_to: "{{ target_server }}"
+  when: archive_location == "remote"
+  with_items:
+    - "{{ archive_base_path }}"
+
+- name: Ensure Main Archive Folder exists locally
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "backup-infra"
+    group: "{{ archive_group }}"
+    mode: 0750
+  with_items:
+    - "{{ archive_base_path }}"
+
+- name: Ensure Local Archive Folder exists
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ archive_user }}"
+    group: "{{ archive_group }}"
+    mode: 0750
+  with_items:
+    - "{{ archive_full_path }}"
+
+- name: Ensure Main logging folder exists for archives
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "backup-infra"
+    group: "{{ archive_group }}"
+    mode: 0755
+  with_items:
+    - "{{ archive_log_path }}"
+
+- name: Ensure logging folders exist for archives
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ archive_user }}"
+    group: "{{ archive_group }}"
+    mode: 0755
+  with_items:
+    - "{{ archive_log_path }}/{{ archive_name }}"
+
+- name: Copy Archive script to server
+  template:
+    src: archive.sh.j2
+    dest: "{{ archive_work_path }}/archive_{{ archive_name }}.sh"
+    owner: "{{ archive_user }}"
+    group: "{{ archive_group }}"
+    mode: 0744
+
+- name: Copy excludes file to server
+  template:
+    src: backup-exclude.txt.j2
+    dest: "{{ archive_work_path }}/archive-exclude_{{ archive_name }}.txt"
+    owner: "{{ archive_user }}"
+    group: "{{ archive_group }}"
+    mode: 0644
+
+- name: Configure archive cron job
+  cron:
+    name: "archive cron job for {{ archive_name }}"
+    backup: yes
+    minute: "{{ archive_minute }}"
+    hour: "{{ archive_hour }}"
+    user: "{{ archive_user }}"
+    job: "sudo /bin/bash {{ archive_work_path }}/archive_{{ archive_name }}.sh"
+    state: "{{ archive_cron_job_state }}"
+

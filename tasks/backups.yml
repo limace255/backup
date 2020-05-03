@@ -1,0 +1,109 @@
+---
+- name: Ensure Backup working folder exists
+  file:
+    path: "{{ backup_work_path }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0700
+
+- name: Ensure Main Backup Folder exists on Target Server
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "backup-infra"
+    group: "{{ backup_group }}"
+    mode: 0750
+  delegate_to: "{{ target_server }}"
+  when: backup_location == "remote"
+  with_items:
+    - "{{ backup_base_path }}"
+
+- name: Ensure Main Backup Folder exists locally
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "backup-infra"
+    group: "{{ backup_group }}"
+    mode: 0750
+  with_items:
+    - "{{ backup_base_path }}"
+
+- name: Ensure Target Backup Folder exists
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0750
+  delegate_to: "{{ target_server }}"
+  when: backup_location == "remote"
+  with_items:
+    - "{{ backup_full_path }}"
+
+- name: Ensure Local Backup Folder exists
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0750
+  when: backup_location == "local"
+  with_items:
+    - "{{ backup_full_path }}"
+
+- name: Ensure Main logging folder exists for backups
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "backup-infra"
+    group: "{{ backup_group }}"
+    mode: 0755
+  with_items:
+    - "{{ backup_log_path }}"
+
+- name: Ensure logging folders exist for backups
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0755
+  with_items:
+    - "{{ backup_log_path }}{{ target_component }}"
+
+- name: Copy backup script to server
+  template:
+    src: backup.sh.j2
+    dest: "{{ backup_work_path }}/backup_{{ backup_name }}.sh"
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0744
+
+- name: Copy excludes file to server
+  template:
+    src: backup-exclude.txt.j2
+    dest: "{{ backup_work_path }}/backup-exclude_{{ backup_name }}.txt"
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0644
+
+- name: Configure backup cron job
+  cron:
+    name: "Backup cron job for {{ backup_name }}"
+    backup: yes
+    minute: "{{ backup_minute }}"
+    hour: "{{ backup_hour }}"
+    user: "{{ backup_user }}"
+    job: "sudo /bin/bash {{ backup_work_path }}/backup_{{ backup_name }}.sh"
+    state: "{{ backup_cron_job_state }}"
+
+- name: Add backup remote host key to server if needed
+  known_hosts:
+    path: "/etc/ssh/ssh_known_hosts"
+    name: "{{ backup_remote_host_name }}"
+    key: "{{ backup_remote_host_name }} {{ backup_remote_host_key }}"
+  when:
+    - backup_remote_host_name
+    - backup_remote_host_key
+

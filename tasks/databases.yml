@@ -1,0 +1,48 @@
+---
+- name:  Ensure Target Backup Folder exists for databases
+  file:
+    path: "{{ backup_base_path }}/{{ item }}/{{ inventory_hostname }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0750
+  delegate_to: "{{ target_server }}"
+  when: backup_mysql and backup_location == "remote"
+  with_items:
+    - "{{ db_dirname }}"
+    - "{{ dbfiles_dirname }}"
+
+- name:  Ensure Local Backup Folder exists for databases
+  file:
+    path: "{{ backup_base_path }}/{{ item }}/{{ inventory_hostname }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0750
+  when: backup_mysql
+  with_items:
+    - "{{ db_dirname }}"
+    - "{{ dbfiles_dirname }}"
+
+- name: Ensure database logging folders exist for backups
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: 0750
+  with_items:
+    - "{{ backup_log_path }}/{{ db_dirname }}"
+  when: backup_mysql
+
+- name: Create MySQL user for DB Dumps
+  mysql_user:
+    name: "{{ backup_mysql_user }}"
+    host: "{{ item }}"
+    priv: "*.*:SELECT"
+    password: "{{ backup_mysql_password }}"
+  with_items:
+    - "127.0.0.1"
+    - "::1"
+    - "localhost"
+  when: not backup_mysql_credential_file

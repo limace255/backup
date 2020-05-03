@@ -1,0 +1,82 @@
+#!/bin/bash
+#
+# {{ ansible_managed }}
+#
+#
+(
+echo "###################################################"
+echo "### BEGIN {{ backup_name|upper }} BACKUP to {{ target_server }}"
+echo "### SRC : {{ backup_directories }} "
+echo "### DEST : {{ backup_full_path }} "
+echo "### $(date)"
+echo "###################################################"
+
+# Common variables.
+REMOTE="{{ backup_remote_connection }}"
+RSYNC="/usr/bin/rsync"
+
+# Backup individual directories
+{% for directory in backup_directories %}
+echo "### Backuping {{ directory }} ###"
+echo "### Logs: {{ backup_log_path }}{{ target_component }}{{ target_dir }}.log ###"
+{% if backup_location == "remote" %}
+$RSYNC {{ backup_remote_connection_rsync_options }} {{ rsync_cmd_option }} -e 'ssh {{ backup_remote_connection_ssh_options }}' {{ rsync_delete_option }}--exclude-from '{{ backup_work_path }}/backup-exclude_{{ backup_name }}.txt' {{ directory }} $REMOTE:{{ backup_full_path }} >> {{ backup_log_path }}{{ target_component }}{{ target_dir }}.log 2>&1
+{% else %}
+$RSYNC {{ rsync_cmd_option }} {{ rsync_delete_option }}--exclude-from '{{ backup_work_path }}/backup-exclude_{{ backup_name }}.txt' {{ directory }} {{ backup_full_path }} >> {{ backup_log_path }}{{ target_component }}{{ target_dir }}.log 2>&1
+{% endif %}
+{% endfor %}
+
+{% if backup_mysql %}
+# MySQL variables
+MYSQL=/usr/bin/mysql
+MYSQLDUMP=/usr/bin/mysqldump
+{% if backup_mysql_credential_file != '' %}
+MYSQL_CREDENTIALS="--defaults-extra-file={{ backup_mysql_credential_file }}"
+{% else %}
+MYSQL_CREDENTIALS="-u {{ backup_mysql_user }} -p{{ backup_mysql_password }}"
+{% endif %}
+
+# Dump all MySQL databases
+echo "### Dumping Databases ###"
+# Print All MySQL databases or load the list
+{% if databases_list %}
+DATABASES=`echo $(cat {{ databases_filelist }})`
+{% else %}
+DATABASES=`$MYSQL $MYSQL_CREDENTIALS -e "SHOW DATABASES;" | grep -Ev '(Database|information_schema|performance_schema|mysql)'`
+{% endif %}
+
+for DB in $DATABASES
+do
+echo "### $DB ###"
+# Dump the database with mysqldump (piped through gzip to conserve IO)
+su - {{ backup_user }} -c "$MYSQLDUMP $MYSQL_CREDENTIALS --single-transaction --quick --lock-tables=false $DB | gzip -f -6 > {{ backup_base_path }}/{{ db_dirname }}/$DB.sql.gz"
+done
+
+# Sync the databases directory
+echo "### Syncing Databases Directory ###"
+echo "### Logs: {{ backup_log_path }}/{{ dbfiles_dirname }}.log ###"
+$RSYNC {{ rsync_cmd_option }} {{ databases_files }} {{ backup_base_path }}/{{ dbfiles_dirname }} >> {{ backup_log_path }}/{{ dbfiles_dirname }}.log 2>&1
+
+{% if databases_location == "remote" %}
+# Backup Databases + files on target server
+echo "### Transfering Databases Dumps ###"
+echo "### Logs: {{ backup_log_path }}/{{ db_dirname }}/transfer_db.log ###"
+$RSYNC {{ backup_remote_connection_rsync_options }} {{ rsync_cmd_option }} -e 'ssh {{ backup_remote_connection_ssh_options }}' {{ rsync_delete_option }}{{ backup_base_path }}/{{ db_dirname }}/ $REMOTE:{{ backup_base_path }}/{{ db_dirname }}/{{ inventory_hostname }}/ >> {{ backup_log_path }}/{{ db_dirname }}/transfer_db.log 2>&1
+echo "### Transfering Databases Files ###"
+echo "### Logs: {{ backup_log_path }}/{{ db_dirname }}/transfer_db_files.log ###"
+$RSYNC {{ backup_remote_connection_rsync_options }} {{ rsync_cmd_option }} -e 'ssh {{ backup_remote_connection_ssh_options }}' {{ rsync_delete_option }}{{ backup_base_path }}/{{ dbfiles_dirname }}/ $REMOTE:{{ backup_base_path }}/{{ dbfiles_dirname }}/{{ inventory_hostname }}/ >> {{ backup_log_path }}/{{ db_dirname }}/transfer_db_files.log 2>&1
+
+{% endif %}
+{% endif %}
+
+echo "#######################################"
+echo "### END {{ backup_name|upper }} BACKUP to {{ target_server }}"
+echo "### SRC : {{ backup_directories }} "
+echo "### DEST : {{ backup_full_path }} "
+echo "### LOGS: {{ backup_log_path }}/backup_{{ backup_name }}.log ###"
+echo "### $(date)"
+echo "#######################################"
+
+)| tee -a {{ backup_log_path }}/backup_{{ backup_name }}.log 2>&1
+exit 0
+

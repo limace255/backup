@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# {{ ansible_managed }}
+#
+#
+(
+echo "###################################################"
+echo "### BEGIN {{ archive_name|upper }} ARCHIVING to {{ target_server }}"
+echo "### SRC : {{ archive_directory }} "
+echo "### DEST : {{ archive_full_path }} "
+echo "### $(date)"
+echo "###################################################"
+
+#`https://github.com/borgbackup/borg <https://github.com/borgbackup/borg>`_
+#`https://borgbackup.readthedocs.io/en/stable/index.html <https://borgbackup.readthedocs.io/en/stable/index.html>`_
+
+# Common variables.
+REMOTE="{{ archive_remote_connection }}"
+RSYNC="/usr/bin/rsync"
+BORG="/usr/bin/borg"
+
+export BORG_PASSPHRASE='{{ archive_passphrase }}'
+
+repository="{{ archive_full_path }}" # directory backing up to
+data_source="{{ archive_directory }}"
+excludelist="{{ archive_work_path }}/archive-exclude_{{ archive_name }}.txt"
+hostname=$(echo $HOSTNAME)
+
+# some helpers and error handling:
+info() { printf "\n%s %s\n\n" "$( date )" "$*" >&2; }
+trap 'echo $( date ) Backup interrupted >&2; exit 2' INT TERM
+
+echo "### Archiving ###"
+
+          sudo -E $BORG create                                  \
+          --verbose                                             \
+          --list                                                \
+          --info                                                \
+          --stats                                               \
+          --show-rc                                             \
+          --compression zlib,9                                  \
+          $repository::$hostname-`date +%Y-%m-%d--%H:%M:%S`     \
+          $data_source                                          \
+          --exclude-caches                                      \
+          --exclude-from $excludelist                           \
+
+backup_exit=$?
+
+echo "### Archive completed ###"
+
+info "### Pruning repository ###"
+          sudo -E $BORG prune                                   \
+          --list                                                \
+          --prefix '{hostname}-'                                \
+          --show-rc                                             \
+          --info $repository                                    \
+          --keep-within=1d                                      \
+          --keep-daily=7                                        \
+          --keep-weekly=4                                       \
+          --keep-monthly=6                                      \
+
+prune_exit=$?
+
+echo "### List of archives in this repo :"
+          sudo -E $BORG list $repository
+
+# use highest exit code as global exit code
+global_exit=$(( backup_exit > prune_exit ? backup_exit : prune_exit ))
+
+if [ ${global_exit} -eq 0 ]; then
+    info "Backup and Prune finished successfully"
+elif [ ${global_exit} -eq 1 ]; then
+    info "Backup and/or Prune finished with warnings"
+else
+    info "Backup and/or Prune finished with errors"
+fi
+
+echo "#######################################"
+echo "### END {{ archive_name|upper }} ARCHIVE to {{ target_server }}"
+echo "### SRC : {{ archive_directory }}"
+echo "### DEST : {{ archive_full_path }}"
+echo "### LOGS: {{ archive_log_path }}//archive_{{ archive_name }}.log ###"
+echo "### $(date)"
+echo "#######################################"
+
+)| tee -a {{ archive_log_path }}//archive_{{ archive_name }}.log 2>&1
+exit ${global_exit}
+
